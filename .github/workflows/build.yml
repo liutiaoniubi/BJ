@@ -1,0 +1,79 @@
+name: Build iOS Tweak
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Environment
+      continue-on-error: true
+      run: |
+        sw_vers || true
+        xcrun --sdk iphoneos --show-sdk-version || true
+
+    - name: Install Theos
+      run: |
+        set -e
+        rm -rf "$HOME/theos"
+        git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+        mkdir -p "$HOME/theos/sdks"
+        SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+        VER=$(xcrun --sdk iphoneos --show-sdk-version)
+        ln -sf "$SYSROOT" "$HOME/theos/sdks/iPhoneOS$VER.sdk"
+        ls "$HOME/theos/sdks"
+        test -f "$HOME/theos/bin/nic.pl"
+
+    - name: Install ldid
+      continue-on-error: true
+      run: |
+        command -v ldid && exit 0
+        brew install ldid || true
+        if ! command -v ldid >/dev/null 2>&1; then
+          if [ "$(uname -m)" = "arm64" ]; then BIN=ldid_macosx_arm64; else BIN=ldid_macosx_x86_64; fi
+          curl -fsSL -o /tmp/ldid "https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/$BIN"
+          chmod +x /tmp/ldid
+          sudo mv /tmp/ldid /usr/local/bin/ldid
+        fi
+        ldid --version || true
+
+    - name: Build
+      continue-on-error: true
+      run: |
+        export THEOS="$HOME/theos"
+        export PATH="$THEOS/bin:/usr/local/bin:$PATH"
+        VER=$(xcrun --sdk iphoneos --show-sdk-version)
+        make package \
+          THEOS_PACKAGE_SCHEME=rootless \
+          TARGET="iphone:clang:$VER:16.5" 2>&1 | tee build.log || true
+        ls -la packages/ 2>/dev/null || true
+
+    - name: Verify
+      continue-on-error: true
+      run: |
+        DYLIB=$(find .theos packages -name "*.dylib" 2>/dev/null | head -1)
+        echo "dylib: $DYLIB"
+        [ -f "$DYLIB" ] && { file "$DYLIB" || true; }
+        [ -f "$DYLIB" ] && (otool -hv "$DYLIB" 2>/dev/null | head -6 || true)
+
+    - name: Upload deb
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoTodayEditBtn-deb
+        path: packages/*.deb
+        if-no-files-found: error
+
+    - name: Upload log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        if-no-files-found: warn
