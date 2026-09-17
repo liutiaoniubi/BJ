@@ -1,9 +1,0 @@
-Package: com.yourname.notodayeditbtn
-Name: NoTodayEditBtn
-Version: 1.0
-Architecture: iphoneos-arm64
-Description: Hide the Edit button at the bottom of Today View.
-Maintainer: liutiaoniubi
-Author: liutiaoniubi
-Section: Tweaks
-Depends: mobilesubstrate
