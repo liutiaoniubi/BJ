@@ -1,0 +1,67 @@
+name: Build iOS Tweak (RootHide / 隐根)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: '打包方案'
+        required: true
+        default: 'roothide'
+        type: choice
+        options:
+          - roothide
+          - rootless
+          - rootful
+
+jobs:
+  build:
+    runs-on: macos-latest   # 苹果官方 Mac 机器，免费
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    # ⚠️ 关键点：隐根(RootHide)必须用 roothide 的 Theos 分支，
+    #    原版 theos 编出来的 deb 架构是 iphoneos-arm64，装不上
+    - name: 安装 RootHide 版 Theos
+      run: |
+        git clone --recursive --depth 1 https://github.com/roothide/theos.git $HOME/theos
+        echo "$HOME/theos/bin" >> $GITHUB_PATH
+        ls $HOME/theos/bin
+
+    - name: 按方案修正 control 的 Architecture
+      run: |
+        SCHEME="${{ github.event.inputs.scheme || 'roothide' }}"
+        echo "方案: $SCHEME"
+        case "$SCHEME" in
+          roothide) ARCH=iphoneos-arm64e ;;
+          rootless) ARCH=iphoneos-arm64  ;;
+          *)        ARCH=iphoneos-arm     ;;
+        esac
+        perl -i -pe "s/^Architecture:.*/Architecture: $ARCH/" control
+        grep "^Architecture:" control
+
+    - name: 编译打包
+      run: |
+        export THEOS=$HOME/theos
+        export PATH="$THEOS/bin:$PATH"
+        SCHEME="${{ github.event.inputs.scheme || 'roothide' }}"
+        make clean package THEOS_PACKAGE_SCHEME=$SCHEME
+        echo "=== 产物 ==="
+        ls -la packages/
+
+    - name: 检查 deb 架构
+      run: |
+        for f in packages/*.deb; do
+          echo "--- $f ---"
+          ar -p "$f" control.tar.* 2>/dev/null | tar -xO ./control 2>/dev/null | grep -E "^(Package|Architecture|Version)" || true
+        done
+
+    - name: 上传 deb
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoTodayEditBtn-deb
+        path: packages/*.deb
+        if-no-files-found: error
