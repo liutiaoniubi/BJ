@@ -1,0 +1,13 @@
+Package: com.yourname.notodayeditbtn
+Name: NoTodayEditBtn
+Version: 1.0
+# 隐根(RootHide) 必须 iphoneos-arm64e
+# 普通无根改 iphoneos-arm64，有根改 iphoneos-arm
+Architecture: iphoneos-arm64e
+Description: 隐藏今日视图（小组件页面）底部的“编辑”按钮
+Maintainer: yourname
+Author: yourname
+Section: Tweaks
+Depends: mobilesubstrate
+# 若启用 Cephei 开关（USE_CEPHEI=1），把上面 Depends 改成：
+# Depends: mobilesubstrate, ws.hbang.common
