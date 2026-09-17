@@ -1,0 +1,85 @@
+name: Build iOS Tweak
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 环境诊断
+      continue-on-error: true
+      run: |
+        sw_vers || true
+        ls -d /Applications/Xcode*.app 2>/dev/null || true
+        xcrun --sdk iphoneos --show-sdk-version || true
+
+    - name: 装 Theos
+      run: |
+        set -e
+        rm -rf "$HOME/theos"
+        export THEOS_NO_SDK_DOWNLOAD=1
+        git clone --recursive --depth 1 https://github.com/roothide/theos.git "$HOME/theos"
+        test -f "$HOME/theos/bin/nic.pl"
+
+    - name: 装 ldid
+      continue-on-error: true
+      run: |
+        [ -x "$HOME/theos/bin/ldid" ] && exit 0
+        command -v ldid && exit 0
+        brew install ldid || true
+        if ! command -v ldid >/dev/null 2>&1; then
+          if [ "$(uname -m)" = "arm64" ]; then BIN=ldid_macosx_arm64; else BIN=ldid_macosx_x86_64; fi
+          curl -fsSL -o /tmp/ldid "https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/$BIN"
+          chmod +x /tmp/ldid
+          sudo mv /tmp/ldid /usr/local/bin/ldid
+        fi
+        ldid --version || true
+
+    - name: 编译
+      id: make
+      continue-on-error: true
+      run: |
+        export THEOS="$HOME/theos"
+        export PATH="$THEOS/bin:/usr/local/bin:$PATH"
+        export THEOS_NO_SDK_DOWNLOAD=1
+        SDK=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo 16.5)
+        SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
+        echo "SDK=$SDK"
+        make package \
+          THEOS_PACKAGE_SCHEME=roothide \
+          TARGET="iphone:clang:$SDK:16.5" \
+          SYSROOT="$SYSROOT" 2>&1 | tee build.log || true
+        echo "=== packages ==="
+        ls -la packages/ 2>/dev/null || true
+
+    - name: 架构信息（容错）
+      continue-on-error: true
+      run: |
+        DYLIB=$(find .theos packages -name "*.dylib" 2>/dev/null | head -1)
+        echo "dylib: $DYLIB"
+        [ -f "$DYLIB" ] && { file "$DYLIB" || true; otool -hv "$DYLIB" 2>/dev/null | head -6 || true; }
+        echo "--- minos ---"
+        [ -f "$DYLIB" ] && (otool -l "$DYLIB" 2>/dev/null | grep -A4 LC_BUILD_VERSION | grep -E "minos|platform" || true)
+        echo "done"
+
+    - name: 上传 deb
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoTodayEditBtn-deb
+        path: packages/*.deb
+        if-no-files-found: error
+
+    - name: 上传日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        if-no-files-found: warn
