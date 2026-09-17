@@ -1,0 +1,7 @@
+{
+  Filter = {
+    bundles = (
+      "com.apple.springboard"
+    );
+  };
+}
