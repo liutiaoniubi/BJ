@@ -1,0 +1,73 @@
+name: Build iOS Tweak
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 环境信息
+      run: |
+        sw_vers
+        xcode-select -p
+        xcrun --sdk iphoneos --show-sdk-path
+        xcrun --sdk iphoneos --show-sdk-version
+
+    - name: 安装 roothide 版 Theos
+      run: |
+        set -x
+        rm -rf "$HOME/theos"
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos)" || \
+          git clone --recursive --depth 1 https://github.com/roothide/theos.git "$HOME/theos"
+        ls "$HOME/theos" || echo "!!! theos 目录不存在"
+
+    - name: 设置隐根架构
+      run: |
+        perl -i -pe 's/^Architecture:.*/Architecture: iphoneos-arm64e/' control
+        grep '^Architecture:' control
+        echo "--- 文件清单 ---"
+        ls -la
+
+    - name: 编译
+      id: compile
+      run: |
+        export THEOS="$HOME/theos"
+        export PATH="$THEOS/bin:$PATH"
+        SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+        echo "SDK=$SDK"
+        make package THEOS_PACKAGE_SCHEME=roothide TARGET="iphone:clang:$SDK:14.0" 2>&1 | tee build.log
+        echo "=== make 退出码: ${PIPESTATUS[0]} ==="
+        exit ${PIPESTATUS[0]}
+
+    - name: 查看 deb 架构
+      if: always()
+      run: |
+        ls -la packages/ 2>/dev/null || echo "packages 目录不存在"
+        for f in packages/*.deb; do
+          [ -e "$f" ] || continue
+          echo "--- $f ---"
+          ar -t "$f" 2>/dev/null
+          ar -p "$f" control.tar.* 2>/dev/null | tar -xzO ./control 2>/dev/null | grep -E '^(Package|Architecture|Version)' || true
+        done
+
+    - name: 上传编译日志（失败时看这个）
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        if-no-files-found: warn
+
+    - name: 上传 deb
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoTodayEditBtn-deb
+        path: packages/*.deb
+        if-no-files-found: error
